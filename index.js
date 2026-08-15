@@ -1,7 +1,7 @@
 const mineflayer = require('mineflayer');
 const http = require('http');
 
-// Web Server phụ (Port phụ: 58878)
+// Web Server phụ (Port: 58878)
 const PORT = process.env.PORT || 58878;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -10,7 +10,6 @@ http.createServer((req, res) => {
   console.log(`Web Server phụ đang chạy ở cổng ${PORT}`);
 });
 
-// Cấu hình Bot Minecraft (Port: 55386)
 const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
@@ -18,37 +17,67 @@ const botOptions = {
   version: false
 };
 
+let bot = null;
+let lastChatTime = 0;
+let patrolTimer = null;
+let isReconnecting = false;
+
 function createBot() {
-  const bot = mineflayer.createBot(botOptions);
+  isReconnecting = false;
+
+  // Dọn dẹp listener và ngắt tiến trình bot cũ triệt để (sửa lỗi Duplicate UUID / Logged in from another location)
+  if (bot) {
+    try {
+      bot.removeAllListeners();
+      bot.quit();
+    } catch (e) {}
+    bot = null;
+  }
+
+  if (patrolTimer) clearTimeout(patrolTimer);
+
+  bot = mineflayer.createBot(botOptions);
 
   bot.on('spawn', () => {
-    console.log('Bot đã vào server!');
-    startAntiBanMovement(bot);
+    console.log('Bot đã vào server thành công!');
+    startSafeAntiBanMovement();
   });
 
   bot.on('death', () => {
     console.log('Bot bị hạ gục, đang hồi sinh...');
   });
 
+  // Xử lý chat an toàn kèm cooldown 3 giây
   bot.on('chat', (username, message) => {
-    if (username === bot.username) return;
+    if (!bot || username === bot.username) return;
+    const now = Date.now();
+    if (now - lastChatTime < 3000) return;
+
     const msg = message.toLowerCase().trim();
 
     if (msg === '!pos' || msg === '!toado') {
-      const p = bot.entity.position;
-      bot.chat(`[Vị trí] X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}, Z: ${Math.round(p.z)}`);
+      lastChatTime = now;
+      if (bot.entity) {
+        const p = bot.entity.position;
+        bot.chat(`[Vị trí] X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}, Z: ${Math.round(p.z)}`);
+      }
     } else if (msg === '!status' || msg === '!trangthai') {
+      lastChatTime = now;
       bot.chat(`[Trạng thái] Máu: ${Math.round(bot.health)}/20 | Thức ăn: ${Math.round(bot.food)}/20`);
     } else if (msg === '!jump' || msg === '!nhay') {
+      lastChatTime = now;
       bot.setControlState('jump', true);
-      setTimeout(() => bot.setControlState('jump', false), 500);
+      setTimeout(() => bot && bot.setControlState('jump', false), 400);
       bot.chat('Đã nhảy!');
     } else if (msg === '!ping') {
+      lastChatTime = now;
       bot.chat('Pong! Bot đang chạy siêu mượt 24/7.');
     }
   });
 
+  // Tự động ăn
   bot.on('health', () => {
+    if (!bot) return;
     if (bot.food < 15) {
       const foodItem = bot.inventory.items().find(item => 
         item.name.includes('cooked') || 
@@ -64,74 +93,88 @@ function createBot() {
     }
   });
 
-  bot.on('end', () => {
-    console.log('Kết nối bị ngắt, đang thử lại sau 10 giây...');
-    setTimeout(createBot, 10000);
-  });
+  // Khắc phục văng ngắt kết nối: Tự động kết nối lại có thời gian chờ ngẫu nhiên (chống spam login)
+  const handleReconnect = (reason) => {
+    if (isReconnecting) return;
+    isReconnecting = true;
 
-  bot.on('error', (err) => console.log('Lỗi hệ thống:', err.message));
+    if (patrolTimer) clearTimeout(patrolTimer);
+
+    const delay = 12000 + Math.floor(Math.random() * 8000); // 12s - 20s
+    console.log(`[${reason}] Mất kết nối. Thử đăng nhập lại sau ${Math.round(delay / 1000)}s...`);
+
+    setTimeout(() => {
+      createBot();
+    }, delay);
+  };
+
+  bot.on('end', () => handleReconnect('End'));
+  bot.on('kicked', (reason) => console.log('Bị kick vì:', reason));
+  bot.on('error', (err) => handleReconnect(`Error: ${err.message}`));
 }
 
-// Thuật toán di chuyển ngẫu nhiên hóa mô phỏng người chơi (Anti-Ban)
-function startAntiBanMovement(bot) {
-  function randomAction() {
-    if (!bot || !bot.entity) return;
+// Khắc phục di chuyển Y=0 và lỗi kẹt gói tin di chuyển (invalid movement)
+function startSafeAntiBanMovement() {
+  function action() {
+    if (!bot || !bot.entity) {
+      patrolTimer = setTimeout(action, 4000);
+      return;
+    }
 
     bot.clearControlStates();
 
-    // Xoay hướng nhìn ngẫu nhiên
-    const yaw = (Math.random() * 2 - 1) * Math.PI;
-    const pitch = (Math.random() * 0.6 - 0.3);
-    bot.look(yaw, pitch, true);
+    // Kiểm tra an toàn vị trí: Nếu Y <= 0 (chưa load xong map hoặc ở void), tạm dừng di chuyển
+    const p = bot.entity.position;
+    if (p.y <= 0) {
+      bot.look((Math.random() * 2 - 1) * Math.PI, 0, false);
+      patrolTimer = setTimeout(action, 5000);
+      return;
+    }
 
-    // Tỷ lệ 30% quơ tay ngẫu nhiên
+    // Xoay góc nhìn tự nhiên
+    const filter = e => e.type === 'player' && e.username !== bot.username && e.position.distanceTo(bot.entity.position) < 8;
+    const nearbyPlayer = bot.nearestEntity(filter);
+
+    if (nearbyPlayer && Math.random() < 0.3) {
+      bot.lookAt(nearbyPlayer.position.offset(0, nearbyPlayer.height, 0), false);
+    } else {
+      bot.look((Math.random() * 2 - 1) * Math.PI, (Math.random() * 0.4 - 0.2), false);
+    }
+
+    // Chuyển ô hotbar
     if (Math.random() < 0.3) {
+      bot.setQuickBarSlot(Math.floor(Math.random() * 9));
+    }
+
+    // Vung tay
+    if (Math.random() < 0.2) {
       bot.swing('arm');
     }
 
-    // Chọn hành động ngẫu nhiên (0: Tiến, 1: Lùi, 2: Trái, 3: Phải, 4: Đứng yên, 5: Tiến + Nhảy, 6: Ngồi)
-    const action = Math.floor(Math.random() * 7);
-
-    switch (action) {
-      case 0:
-        bot.setControlState('forward', true);
-        break;
-      case 1:
-        bot.setControlState('back', true);
-        break;
-      case 2:
-        bot.setControlState('left', true);
-        break;
-      case 3:
-        bot.setControlState('right', true);
-        break;
-      case 4:
-        // Đứng yên quan sát
-        break;
-      case 5:
-        bot.setControlState('forward', true);
-        bot.setControlState('jump', true);
-        setTimeout(() => bot.setControlState('jump', false), 400);
-        break;
-      case 6:
+    // Di chuyển quãng ngắn an toàn
+    const moveType = Math.floor(Math.random() * 6);
+    switch (moveType) {
+      case 0: bot.setControlState('forward', true); break;
+      case 1: bot.setControlState('back', true); break;
+      case 2: bot.setControlState('left', true); break;
+      case 3: bot.setControlState('right', true); break;
+      case 4: 
         bot.setControlState('sneak', true);
-        bot.setControlState('forward', true);
-        setTimeout(() => bot.setControlState('sneak', false), 1200);
+        setTimeout(() => bot && bot.setControlState('sneak', false), 800);
         break;
+      case 5: break;
     }
 
-    // Thời gian di chuyển ngắn ngẫu nhiên từ 1s - 2.5s
-    const moveDuration = 1000 + Math.random() * 1500;
+    const moveDuration = 500 + Math.random() * 700;
     setTimeout(() => {
       if (bot && bot.entity) bot.clearControlStates();
     }, moveDuration);
 
-    // Thời gian nghỉ ngẫu nhiên trước hành động tiếp theo (3s - 8s)
-    const nextDelay = 3000 + Math.random() * 5000;
-    setTimeout(randomAction, nextDelay);
+    const nextDelay = 4000 + Math.random() * 5000;
+    patrolTimer = setTimeout(action, nextDelay);
   }
 
-  randomAction();
+  action();
 }
 
 createBot();
