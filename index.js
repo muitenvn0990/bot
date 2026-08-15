@@ -19,7 +19,7 @@ const mineflayer = require('mineflayer');
 
 const serverConfig = {
   host: 'muitenvn.seedloaf.gg',
-  port: 54162,
+  port: 55386,
   username: 'AFK_Bot_247',
   version: '1.20.4'
 };
