@@ -1,126 +1,105 @@
-// 1. TAO WEB SERVER PHU DE CLOUD KHONG BAO LOI PORT (Dung module http co san)
+const mineflayer = require('mineflayer');
 const http = require('http');
-const PORT = process.env.PORT || 8080;
 
+// Web Server phụ (Port phụ: 58878)
+const PORT = process.env.PORT || 58878;
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bot AFK Minecraft 24/7 dang hoat dong mượt mà!\n');
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('AFK_Bot_247 dang hoat dong 24/7!');
 }).listen(PORT, () => {
-  console.log(`[HTTP] Web server phu dang chay tren port ${PORT}`);
+  console.log(`Web Server phụ đang chạy ở cổng ${PORT}`);
 });
 
-// 2. BYPASS KIEM TRA PHIEN BAN MINECRAFT
-try {
-  const versionCheckingPath = require.resolve('minecraft-protocol/src/client/versionChecking');
-  require.cache[versionCheckingPath].exports = function () {};
-} catch (e) {}
-
-const mineflayer = require('mineflayer');
-
-const serverConfig = {
+// Cấu hình Bot Minecraft (Port mới: 55386)
+const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
   username: 'AFK_Bot_247',
-  version: '1.20.4'
+  version: false
 };
 
-let walkInterval = null;
-let walkTimeout = null;
-
-function startBot() {
-  console.log(`[HE THONG] Dang khoi tao bot: ${serverConfig.username}...`);
-
-  const bot = mineflayer.createBot(serverConfig);
-
-  // Bat vat ly de bot tuan tra hinh vuong
-  bot.once('inject_allowed', () => {
-    if (bot.physics) bot.physics.enabled = true;
-  });
-
-  bot.once('login', () => {
-    console.log(`[HE THONG] Server da xac nhan Login thanh cong (${bot.username})!`);
-  });
+function createBot() {
+  const bot = mineflayer.createBot(botOptions);
 
   bot.on('spawn', () => {
-    console.log(`[HE THONG] Bot ${bot.username} da vao game & bat dau tuan tra!`);
-
-    if (walkInterval) clearInterval(walkInterval);
-    if (walkTimeout) clearTimeout(walkTimeout);
-
-    let step = 0;
-    walkInterval = setInterval(() => {
-      if (!bot || !bot.entity) return;
-
-      const angles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
-      const currentAngle = angles[step % 4];
-
-      bot.look(currentAngle, 0, true);
-      bot.setControlState('forward', true);
-
-      walkTimeout = setTimeout(() => {
-        if (bot) {
-          bot.setControlState('forward', false);
-          console.log(`[PATROL] Da xong canh ${ (step % 4) + 1 }/4.`);
-        }
-      }, 2000);
-
-      step++;
-    }, 5000);
+    console.log('Bot đã vào server!');
+    bot.chat('AFK_Bot_247 đã sẵn sàng trực 24/7!');
+    startPatrol(bot);
   });
 
-  // TU DONG HOI SINH
   bot.on('death', () => {
-    console.log('[SU KIEN] Bot da chet! Dang tu dong hoi sinh...');
-    if (walkInterval) clearInterval(walkInterval);
-    if (walkTimeout) clearTimeout(walkTimeout);
-    setTimeout(() => { bot.respawn(); }, 2000);
+    console.log('Bot bị hạ gục, đang hồi sinh...');
   });
 
-  // TU DONG AN
-  bot.on('health', async () => {
-    if (bot.food < 15) {
-      try {
-        const food = bot.inventory.items().find(item => 
-          item.name.includes('cooked') || item.name.includes('bread') || 
-          item.name.includes('apple') || item.name.includes('steak')
-        );
-        if (food) {
-          await bot.equip(food, 'hand');
-          await bot.consume();
-          console.log('[THUC AN] Da tu dong an xong!');
-        }
-      } catch (err) {}
-    }
-  });
-
-  // PHAN HOI CHAT
-  bot.on('chat', async (username, message) => {
+  bot.on('chat', (username, message) => {
     if (username === bot.username) return;
     const msg = message.toLowerCase().trim();
 
-    if (msg.includes('chao bot') || msg.includes('hi bot')) {
-      bot.chat(`Chao ${username}! Minh dang di tuan tra AFK 24/7.`);
-    } else if (msg.includes('bot dau')) {
-      if (bot.entity) {
-        const pos = bot.entity.position;
-        bot.chat(`Vi tri X: ${Math.round(pos.x)}, Y: ${Math.round(pos.y)}, Z: ${Math.round(pos.z)}`);
+    if (msg === '!pos' || msg === '!toado') {
+      const p = bot.entity.position;
+      bot.chat(`[Vị trí] X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}, Z: ${Math.round(p.z)}`);
+    } else if (msg === '!status' || msg === '!trangthai') {
+      bot.chat(`[Trạng thái] Máu: ${Math.round(bot.health)}/20 | Thức ăn: ${Math.round(bot.food)}/20`);
+    } else if (msg === '!jump' || msg === '!nhay') {
+      bot.setControlState('jump', true);
+      setTimeout(() => bot.setControlState('jump', false), 500);
+      bot.chat('Đã nhảy!');
+    } else if (msg === '!ping') {
+      bot.chat('Pong! Bot đang chạy siêu mượt 24/7.');
+    }
+  });
+
+  bot.on('health', () => {
+    if (bot.food < 15) {
+      const foodItem = bot.inventory.items().find(item => 
+        item.name.includes('cooked') || 
+        item.name.includes('bread') || 
+        item.name.includes('apple') || 
+        item.name.includes('steak')
+      );
+      if (foodItem) {
+        bot.equip(foodItem, 'hand')
+          .then(() => bot.consume())
+          .catch(() => {});
       }
     }
   });
 
-  // KET NOI LAI
-  bot.on('end', (reason) => {
-    if (walkInterval) clearInterval(walkInterval);
-    if (walkTimeout) clearTimeout(walkTimeout);
-    console.log(`[HE THONG] Ngat ket noi (${reason}). Thu lai sau 15 giay...`);
-    setTimeout(startBot, 15000);
+  bot.on('end', () => {
+    console.log('Kết nối bị ngắt, đang thử lại sau 10 giây...');
+    setTimeout(createBot, 10000);
   });
 
-  bot.on('error', (err) => {
-    if (walkInterval) clearInterval(walkInterval);
-    if (walkTimeout) clearTimeout(walkTimeout);
-    console.log('[LOI MANG]', err.message);
-  });
+  bot.on('error', (err) => console.log('Lỗi hệ thống:', err.message));
 }
 
-startBot();
+function startPatrol(bot) {
+  let step = 0;
+  setInterval(() => {
+    if (!bot || !bot.entity) return;
+    bot.clearControlStates();
+
+    switch (step % 4) {
+      case 0:
+        bot.setControlState('forward', true);
+        bot.look(0, 0);
+        break;
+      case 1:
+        bot.setControlState('left', true);
+        bot.look(Math.PI / 2, 0);
+        break;
+      case 2:
+        bot.setControlState('back', true);
+        bot.look(Math.PI, 0);
+        break;
+      case 3:
+        bot.setControlState('right', true);
+        bot.look(-Math.PI / 2, 0);
+        bot.setControlState('jump', true);
+        break;
+    }
+    step++;
+  }, 3000);
+}
+
+createBot();
