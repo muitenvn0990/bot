@@ -10,7 +10,7 @@ http.createServer((req, res) => {
   console.log(`Web Server phụ đang chạy ở cổng ${PORT}`);
 });
 
-// Cấu hình Bot Minecraft (Port mới: 55386)
+// Cấu hình Bot Minecraft (Port: 55386)
 const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
@@ -23,7 +23,7 @@ function createBot() {
 
   bot.on('spawn', () => {
     console.log('Bot đã vào server!');
-    startPatrol(bot);
+    startAntiBanMovement(bot);
   });
 
   bot.on('death', () => {
@@ -72,33 +72,66 @@ function createBot() {
   bot.on('error', (err) => console.log('Lỗi hệ thống:', err.message));
 }
 
-function startPatrol(bot) {
-  let step = 0;
-  setInterval(() => {
+// Thuật toán di chuyển ngẫu nhiên hóa mô phỏng người chơi (Anti-Ban)
+function startAntiBanMovement(bot) {
+  function randomAction() {
     if (!bot || !bot.entity) return;
+
     bot.clearControlStates();
 
-    switch (step % 4) {
+    // Xoay hướng nhìn ngẫu nhiên
+    const yaw = (Math.random() * 2 - 1) * Math.PI;
+    const pitch = (Math.random() * 0.6 - 0.3);
+    bot.look(yaw, pitch, true);
+
+    // Tỷ lệ 30% quơ tay ngẫu nhiên
+    if (Math.random() < 0.3) {
+      bot.swing('arm');
+    }
+
+    // Chọn hành động ngẫu nhiên (0: Tiến, 1: Lùi, 2: Trái, 3: Phải, 4: Đứng yên, 5: Tiến + Nhảy, 6: Ngồi)
+    const action = Math.floor(Math.random() * 7);
+
+    switch (action) {
       case 0:
         bot.setControlState('forward', true);
-        bot.look(0, 0);
         break;
       case 1:
-        bot.setControlState('left', true);
-        bot.look(Math.PI / 2, 0);
+        bot.setControlState('back', true);
         break;
       case 2:
-        bot.setControlState('back', true);
-        bot.look(Math.PI, 0);
+        bot.setControlState('left', true);
         break;
       case 3:
         bot.setControlState('right', true);
-        bot.look(-Math.PI / 2, 0);
+        break;
+      case 4:
+        // Đứng yên quan sát
+        break;
+      case 5:
+        bot.setControlState('forward', true);
         bot.setControlState('jump', true);
+        setTimeout(() => bot.setControlState('jump', false), 400);
+        break;
+      case 6:
+        bot.setControlState('sneak', true);
+        bot.setControlState('forward', true);
+        setTimeout(() => bot.setControlState('sneak', false), 1200);
         break;
     }
-    step++;
-  }, 3000);
+
+    // Thời gian di chuyển ngắn ngẫu nhiên từ 1s - 2.5s
+    const moveDuration = 1000 + Math.random() * 1500;
+    setTimeout(() => {
+      if (bot && bot.entity) bot.clearControlStates();
+    }, moveDuration);
+
+    // Thời gian nghỉ ngẫu nhiên trước hành động tiếp theo (3s - 8s)
+    const nextDelay = 3000 + Math.random() * 5000;
+    setTimeout(randomAction, nextDelay);
+  }
+
+  randomAction();
 }
 
 createBot();
