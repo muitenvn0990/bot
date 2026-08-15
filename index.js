@@ -23,7 +23,6 @@ function createBot() {
 
   bot.on('spawn', () => {
     console.log('Bot đã vào server!');
-    bot.chat('AFK_Bot_247 đã sẵn sàng trực 24/7!');
     startPatrol(bot);
   });
 
