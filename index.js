@@ -1,23 +1,19 @@
 const mineflayer = require('mineflayer');
 const http = require('http');
 
-// Bắt lỗi hệ thống để tránh crash app 24/7 trên Render
-process.on('uncaughtException', (err) => {
-  console.log('[Lỗi Bắt Được]:', err.message);
-});
-process.on('unhandledRejection', (reason) => {
-  console.log('[Lỗi Rejection]:', reason);
-});
+// ==================== KHỎI TẠO WEB SERVER (GIỮ BOT ONLINE 24/7 TRÊN RENDER) ====================
+process.on('uncaughtException', (err) => console.log('[Lỗi Hệ Thống]:', err.message));
+process.on('unhandledRejection', (reason) => console.log('[Lỗi Rejection]:', reason));
 
-// Web Server phụ duy trì uptime (Port từ process.env.PORT hoặc 58878)
 const PORT = process.env.PORT || 58878;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('AFK_Bot_247 dang hoat dong 24/7!');
+  res.end('AFK_Bot_247 đang chạy 24/7!');
 }).listen(PORT, () => {
-  console.log(`Web Server phụ đang chạy ở cổng ${PORT}`);
+  console.log(`[Web Server] Khởi chạy cổng ${PORT}`);
 });
 
+// ==================== CẤU HÌNH BOT ====================
 const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
@@ -25,18 +21,14 @@ const botOptions = {
   version: '1.20.1'
 };
 
-// Cấu hình tài khoản tự động đăng nhập (Nếu server yêu cầu /login)
-const AUTH_PASSWORD = ''; // Nhập mật khẩu vào đây nếu server cần /login hoặc /register
-
 let bot = null;
-let lastChatTime = 0;
-let patrolTimer = null;
+let afkLoopTimer = null;
 let isReconnecting = false;
-let followTarget = null;
+let lastPosition = null;
+let stuckCount = 0;
 
 function createBot() {
   isReconnecting = false;
-  followTarget = null;
 
   if (bot) {
     try {
@@ -46,212 +38,190 @@ function createBot() {
     bot = null;
   }
 
-  if (patrolTimer) clearTimeout(patrolTimer);
+  if (afkLoopTimer) clearTimeout(afkLoopTimer);
 
-  try {
-    bot = mineflayer.createBot(botOptions);
-  } catch (err) {
-    console.log('Lỗi khởi tạo bot:', err.message);
-    handleReconnect('CreateBot Fail');
-    return;
-  }
+  bot = mineflayer.createBot(botOptions);
 
-  // Khi bot vào server
   bot.on('spawn', () => {
-    console.log('Bot đã kết nối vào server thành công!');
-    startSafeAntiBanMovement();
+    console.log('[Bot] Đã vào server! Khởi động hệ thống Anti-AFK thế hệ mới...');
+    startAdvancedAFKEngine();
   });
 
-  // Tự động gửi lệnh /login hoặc /register nếu server yêu cầu
-  bot.on('messagestr', (message) => {
-    if (!AUTH_PASSWORD) return;
-    const msg = message.toLowerCase();
-    if (msg.includes('/login') || msg.includes('/dangnhap')) {
-      bot.chat(`/login ${AUTH_PASSWORD}`);
-    } else if (msg.includes('/register') || msg.includes('/dangky')) {
-      bot.chat(`/register ${AUTH_PASSWORD} ${AUTH_PASSWORD}`);
-    }
-  });
-
-  // Tự động hồi sinh khi chết
   bot.on('death', () => {
-    console.log('Bot đã hy sinh, đang tiến hành hồi sinh...');
+    console.log('[Bot] Bị hạ gục, đang tự động hồi sinh...');
   });
 
-  // Xử lý các câu lệnh qua chat (cooldown 2.5s)
-  bot.on('chat', (username, message) => {
-    if (!bot || username === bot.username) return;
-
-    const now = Date.now();
-    if (now - lastChatTime < 2500) return;
-
-    const msg = message.toLowerCase().trim();
-    const args = msg.split(' ');
-    const cmd = args[0];
-
-    if (cmd === '!help' || cmd === '!trogiup') {
-      lastChatTime = now;
-      bot.chat('Lệnh bot: !pos, !status, !inv, !jump, !follow, !stop, !ping');
-    } 
-    else if (cmd === '!pos' || cmd === '!toado') {
-      lastChatTime = now;
-      if (bot.entity) {
-        const p = bot.entity.position;
-        bot.chat(`[Vị trí] X: ${Math.round(p.x)}, Y: ${Math.round(p.y)}, Z: ${Math.round(p.z)}`);
-      }
-    } 
-    else if (cmd === '!status' || cmd === '!trangthai') {
-      lastChatTime = now;
-      bot.chat(`[Trạng thái] Máu: ${Math.round(bot.health)}/20 | Thức ăn: ${Math.round(bot.food)}/20`);
-    } 
-    else if (cmd === '!inv' || cmd === '!tui') {
-      lastChatTime = now;
-      const items = bot.inventory.items().map(i => `${i.displayName} x${i.count}`).slice(0, 4).join(', ');
-      bot.chat(`[Túi đồ] ${items || 'Túi đồ trống'}`);
-    }
-    else if (cmd === '!jump' || cmd === '!nhay') {
-      lastChatTime = now;
-      bot.setControlState('jump', true);
-      setTimeout(() => bot && bot.setControlState('jump', false), 400);
-      bot.chat('Đã nhảy!');
-    } 
-    else if (cmd === '!follow' || cmd === '!theotui') {
-      lastChatTime = now;
-      const target = bot.players[username]?.entity;
-      if (target) {
-        followTarget = username;
-        bot.chat(`Đang đi theo ${username}!`);
-      } else {
-        bot.chat('Không nhìn thấy bạn ở gần!');
-      }
-    }
-    else if (cmd === '!stop' || cmd === '!dung') {
-      lastChatTime = now;
-      followTarget = null;
-      bot.clearControlStates();
-      bot.chat('Đã dừng đi theo.');
-    }
-    else if (cmd === '!ping') {
-      lastChatTime = now;
-      bot.chat('Pong! Bot đang chạy siêu mượt 24/7.');
-    }
-  });
-
-  // Tự động ăn khi độ no < 15
+  // Tự động ăn khi đói
   bot.on('health', () => {
-    if (!bot) return;
-    if (bot.food < 15) {
-      const foodItem = bot.inventory.items().find(item => 
-        item.name.includes('cooked') || 
-        item.name.includes('bread') || 
-        item.name.includes('apple') || 
-        item.name.includes('steak') ||
-        item.name.includes('porkchop')
-      );
-
-      if (foodItem) {
-        bot.equip(foodItem, 'hand')
-          .then(() => bot.consume())
-          .catch(() => {});
-      }
+    if (!bot || bot.food >= 15) return;
+    const food = bot.inventory.items().find(i => 
+      ['cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'bread', 'apple', 'baked_potato', 'steak'].some(f => i.name.includes(f))
+    );
+    if (food) {
+      bot.equip(food, 'hand')
+        .then(() => bot.consume())
+        .catch(() => {});
     }
   });
 
-  // Xử lý mất kết nối tự động kết nối lại
+  // Tự động kết nối lại khi mất mạng / kicked
   const handleReconnect = (reason) => {
     if (isReconnecting) return;
     isReconnecting = true;
-    if (patrolTimer) clearTimeout(patrolTimer);
+    if (afkLoopTimer) clearTimeout(afkLoopTimer);
 
-    const delay = 10000 + Math.floor(Math.random() * 5000); // 10s - 15s
-    console.log(`[${reason}] Mất kết nối. Tự động kết nối lại sau ${Math.round(delay / 1000)}s...`);
-
-    setTimeout(() => {
-      createBot();
-    }, delay);
+    const delay = 10000 + Math.floor(Math.random() * 5000);
+    console.log(`[${reason}] Mất kết nối. Thử đăng nhập lại sau ${Math.round(delay / 1000)}s...`);
+    setTimeout(() => createBot(), delay);
   };
 
   bot.on('end', () => handleReconnect('End'));
-  bot.on('kicked', (reason) => console.log('Bị kick vì:', reason));
+  bot.on('kicked', (reason) => handleReconnect(`Kicked`));
   bot.on('error', (err) => handleReconnect(`Error: ${err.message}`));
 }
 
-// Hệ thống Anti-AFK & Đi theo người chơi thông minh
-function startSafeAntiBanMovement() {
-  function action() {
+// ==================== HỆ THỐNG ANTI-AFK THÔNG MINH (GIẢ LẬP NGƯỜI THẬT) ====================
+
+// 1. Hàm quay đầu mượt mà (Tránh xoay giật cục bị plugin phát hiện)
+function smoothLook(targetYaw, targetPitch, steps = 8) {
+  if (!bot || !bot.entity) return;
+  let currentStep = 0;
+  const startYaw = bot.entity.yaw;
+  const startPitch = bot.entity.pitch;
+
+  const interval = setInterval(() => {
     if (!bot || !bot.entity) {
-      patrolTimer = setTimeout(action, 3000);
+      clearInterval(interval);
+      return;
+    }
+    currentStep++;
+    const progress = currentStep / steps;
+    const nextYaw = startYaw + (targetYaw - startYaw) * progress;
+    const nextPitch = startPitch + (targetPitch - startPitch) * progress;
+
+    bot.look(nextYaw, nextPitch, true);
+
+    if (currentStep >= steps) clearInterval(interval);
+  }, 40);
+}
+
+// 2. Lõi hành vi Anti-AFK đa dạng
+function startAdvancedAFKEngine() {
+  function afkRoutine() {
+    if (!bot || !bot.entity) {
+      afkLoopTimer = setTimeout(afkRoutine, 3000);
       return;
     }
 
     bot.clearControlStates();
-
-    // Đi theo người chơi (nếu nhận lệnh !follow)
-    if (followTarget) {
-      const playerEntity = bot.players[followTarget]?.entity;
-      if (playerEntity) {
-        const dist = bot.entity.position.distanceTo(playerEntity.position);
-        bot.lookAt(playerEntity.position.offset(0, playerEntity.height, 0), true);
-        if (dist > 3) {
-          bot.setControlState('forward', true);
-          if (dist > 8) bot.setControlState('sprint', true);
-        }
-        patrolTimer = setTimeout(action, 600);
-        return;
-      }
-    }
-
-    // Anti-Void Protection (Kiểm tra xem bot có rơi ra khỏi world không)
     const p = bot.entity.position;
+
+    // BẢO VỆ 1: Tránh rớt Void / Chưa load xong map
     if (p.y <= 0) {
-      bot.look((Math.random() * 2 - 1) * Math.PI, 0, false);
-      patrolTimer = setTimeout(action, 4000);
+      afkLoopTimer = setTimeout(afkRoutine, 4000);
       return;
     }
 
-    // Xoay góc nhìn tự nhiên hướng về người chơi ở gần
-    const nearbyPlayer = bot.nearestEntity(e => e.type === 'player' && e.username !== bot.username && e.position.distanceTo(bot.entity.position) < 8);
-    if (nearbyPlayer && Math.random() < 0.4) {
-      bot.lookAt(nearbyPlayer.position.offset(0, nearbyPlayer.height, 0), false);
+    // BẢO VỆ 2: Kiểm tra kẹt tường (Stuck Detection)
+    if (lastPosition && p.distanceTo(lastPosition) < 0.2) {
+      stuckCount++;
     } else {
-      bot.look((Math.random() * 2 - 1) * Math.PI, (Math.random() * 0.4 - 0.2), false);
+      stuckCount = 0;
+    }
+    lastPosition = p.clone();
+
+    // Nếu bị kẹt vào góc quá 3 lần -> Tự xoay 180 độ và nhảy ra ngoài
+    if (stuckCount >= 3) {
+      stuckCount = 0;
+      const escapeYaw = bot.entity.yaw + Math.PI;
+      smoothLook(escapeYaw, 0);
+      bot.setControlState('jump', true);
+      bot.setControlState('forward', true);
+      setTimeout(() => {
+        if (bot) bot.clearControlStates();
+      }, 600);
+      afkLoopTimer = setTimeout(afkRoutine, 2000);
+      return;
     }
 
-    // Chuyển slot hotbar ngẫu nhiên
-    if (Math.random() < 0.25) {
-      bot.setQuickBarSlot(Math.floor(Math.random() * 9));
-    }
+    // RANDOM HÀNH VI GIẢ LẬP NGƯỜI CHƠI THẬT (5 KỊCH BẢN)
+    const actionType = Math.floor(Math.random() * 5);
 
-    // Vung tay ngẫu nhiên
-    if (Math.random() < 0.2) {
-      if (typeof bot.swingArm === 'function') bot.swingArm('right');
-      else if (typeof bot.swing === 'function') bot.swing('arm');
-    }
-
-    // Di chuyển ngắn ngẫu nhiên
-    const moveType = Math.floor(Math.random() * 6);
-    switch (moveType) {
-      case 0: bot.setControlState('forward', true); break;
-      case 1: bot.setControlState('back', true); break;
-      case 2: bot.setControlState('left', true); break;
-      case 3: bot.setControlState('right', true); break;
-      case 4: 
-        bot.setControlState('sneak', true); 
-        setTimeout(() => bot && bot.setControlState('sneak', false), 800); 
+    switch (actionType) {
+      case 0: {
+        // Kịch bản 0: Đứng quan sát xung quanh (Xoay đầu mượt + Nhìn người chơi gần đó)
+        const nearbyPlayer = bot.nearestEntity(e => e.type === 'player' && e.username !== bot.username && e.position.distanceTo(bot.entity.position) < 10);
+        if (nearbyPlayer) {
+          const target = nearbyPlayer.position.offset(0, nearbyPlayer.height, 0);
+          bot.lookAt(target, false);
+        } else {
+          const randomYaw = (Math.random() * 2 - 1) * Math.PI;
+          const randomPitch = (Math.random() * 0.4 - 0.2);
+          smoothLook(randomYaw, randomPitch);
+        }
+        if (Math.random() < 0.4) bot.swingArm('right');
         break;
-      case 5: break;
+      }
+
+      case 1: {
+        // Kịch bản 1: Đi dạo ngắn (Tiến/Lùi) kèm kiểm tra chướng ngại vật
+        const randomDir = Math.random() < 0.7 ? 'forward' : 'back';
+        bot.setControlState(randomDir, true);
+        
+        // Nếu có vật cản thấp 1 block -> Tự động nhảy qua
+        if (Math.random() < 0.3) {
+          bot.setControlState('jump', true);
+          setTimeout(() => bot && bot.setControlState('jump', false), 350);
+        }
+
+        setTimeout(() => {
+          if (bot) bot.clearControlStates();
+        }, 600 + Math.random() * 800);
+        break;
+      }
+
+      case 2: {
+        // Kịch bản 2: Ngồi xổm (Sneak) kiểm tra góc nhìn (Giống đang xem kho/chat)
+        bot.setControlState('sneak', true);
+        const lookDownPitch = 0.5 + Math.random() * 0.3;
+        smoothLook(bot.entity.yaw, lookDownPitch);
+
+        setTimeout(() => {
+          if (!bot) return;
+          bot.setControlState('sneak', false);
+          smoothLook(bot.entity.yaw, 0);
+        }, 1200 + Math.random() * 1000);
+        break;
+      }
+
+      case 3: {
+        // Kịch bản 3: Đổi ô Hotbar + Vung tay (Giả lập sắp xếp túi đồ)
+        const randomSlot = Math.floor(Math.random() * 9);
+        bot.setQuickBarSlot(randomSlot);
+        setTimeout(() => {
+          if (bot) bot.swingArm('right');
+        }, 300);
+        break;
+      }
+
+      case 4: {
+        // Kịch bản 4: Nhảy quay góc (Jump + Turn 90 độ)
+        const newYaw = bot.entity.yaw + (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
+        smoothLook(newYaw, 0);
+        bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (bot) bot.setControlState('jump', false);
+        }, 400);
+        break;
+      }
     }
 
-    const moveDuration = 400 + Math.random() * 600;
-    setTimeout(() => {
-      if (bot && bot.entity && !followTarget) bot.clearControlStates();
-    }, moveDuration);
-
-    const nextDelay = 3500 + Math.random() * 4500;
-    patrolTimer = setTimeout(action, nextDelay);
+    // Thời gian nghỉ giữa các hành động ngẫu nhiên (từ 3.5s - 7s) để không tạo chu kỳ cố định
+    const nextInterval = 3500 + Math.floor(Math.random() * 3500);
+    afkLoopTimer = setTimeout(afkRoutine, nextInterval);
   }
 
-  action();
+  afkRoutine();
 }
 
 createBot();
