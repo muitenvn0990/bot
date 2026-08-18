@@ -1,7 +1,7 @@
 const mineflayer = require('mineflayer');
 const http = require('http');
 
-// Web Server phụ (Port: 58878)
+// Web Server phụ duy trì Render (Port: 58878 hoặc tự động lấy từ process.env.PORT)
 const PORT = process.env.PORT || 58878;
 
 http.createServer((req, res) => {
@@ -15,7 +15,7 @@ const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
   username: 'AFK_Bot_247',
-  version: false
+  version: '1.20.1' // Đã cố định phiên bản để tránh lỗi tự động dò tìm
 };
 
 let bot = null;
@@ -26,7 +26,7 @@ let isReconnecting = false;
 function createBot() {
   isReconnecting = false;
 
-  // Dọn dẹp listener và ngắt tiến trình bot cũ triệt để (sửa lỗi Duplicate UUID / Logged in from another location)
+  // Dọn dẹp listener và ngắt tiến trình bot cũ triệt để
   if (bot) {
     try {
       bot.removeAllListeners();
@@ -37,7 +37,13 @@ function createBot() {
 
   if (patrolTimer) clearTimeout(patrolTimer);
 
-  bot = mineflayer.createBot(botOptions);
+  try {
+    bot = mineflayer.createBot(botOptions);
+  } catch (err) {
+    console.log('Khởi tạo Bot thất bại:', err.message);
+    handleReconnect('CreateBot Error');
+    return;
+  }
 
   bot.on('spawn', () => {
     console.log('Bot đã vào server thành công!');
@@ -96,7 +102,6 @@ function createBot() {
     }
   });
 
-  // Khắc phục văng ngắt kết nối: Tự động kết nối lại có thời gian chờ ngẫu nhiên (chống spam login)
   const handleReconnect = (reason) => {
     if (isReconnecting) return;
     isReconnecting = true;
@@ -115,7 +120,6 @@ function createBot() {
   bot.on('error', (err) => handleReconnect(`Error: ${err.message}`));
 }
 
-// Khắc phục di chuyển Y=0 và lỗi kẹt gói tin di chuyển (invalid movement)
 function startSafeAntiBanMovement() {
   function action() {
     if (!bot || !bot.entity) {
@@ -125,7 +129,7 @@ function startSafeAntiBanMovement() {
 
     bot.clearControlStates();
 
-    // Kiểm tra an toàn vị trí: Nếu Y <= 0 (chưa load xong map hoặc ở void), tạm dừng di chuyển
+    // Kiểm tra vị trí an toàn
     const p = bot.entity.position;
     if (p.y <= 0) {
       bot.look((Math.random() * 2 - 1) * Math.PI, 0, false);
@@ -133,7 +137,7 @@ function startSafeAntiBanMovement() {
       return;
     }
 
-    // Xoay góc nhìn tự nhiên
+    // Xoay góc nhìn
     const filter = e => e.type === 'player' && e.username !== bot.username && e.position.distanceTo(bot.entity.position) < 8;
     const nearbyPlayer = bot.nearestEntity(filter);
 
@@ -157,7 +161,7 @@ function startSafeAntiBanMovement() {
       }
     }
 
-    // Di chuyển quãng ngắn an toàn
+    // Di chuyển
     const moveType = Math.floor(Math.random() * 6);
     switch (moveType) {
       case 0:
