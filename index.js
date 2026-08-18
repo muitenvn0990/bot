@@ -3,6 +3,7 @@ const http = require('http');
 
 // Web Server phụ (Port: 58878)
 const PORT = process.env.PORT || 58878;
+
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('AFK_Bot_247 dang hoat dong 24/7!');
@@ -50,6 +51,7 @@ function createBot() {
   // Xử lý chat an toàn kèm cooldown 3 giây
   bot.on('chat', (username, message) => {
     if (!bot || username === bot.username) return;
+
     const now = Date.now();
     if (now - lastChatTime < 3000) return;
 
@@ -85,6 +87,7 @@ function createBot() {
         item.name.includes('apple') || 
         item.name.includes('steak')
       );
+
       if (foodItem) {
         bot.equip(foodItem, 'hand')
           .then(() => bot.consume())
@@ -97,7 +100,6 @@ function createBot() {
   const handleReconnect = (reason) => {
     if (isReconnecting) return;
     isReconnecting = true;
-
     if (patrolTimer) clearTimeout(patrolTimer);
 
     const delay = 12000 + Math.floor(Math.random() * 8000); // 12s - 20s
@@ -148,21 +150,34 @@ function startSafeAntiBanMovement() {
 
     // Vung tay
     if (Math.random() < 0.2) {
-      bot.swing('arm');
+      if (typeof bot.swingArm === 'function') {
+        bot.swingArm('right');
+      } else if (typeof bot.swing === 'function') {
+        bot.swing('arm');
+      }
     }
 
     // Di chuyển quãng ngắn an toàn
     const moveType = Math.floor(Math.random() * 6);
     switch (moveType) {
-      case 0: bot.setControlState('forward', true); break;
-      case 1: bot.setControlState('back', true); break;
-      case 2: bot.setControlState('left', true); break;
-      case 3: bot.setControlState('right', true); break;
-      case 4: 
+      case 0:
+        bot.setControlState('forward', true);
+        break;
+      case 1:
+        bot.setControlState('back', true);
+        break;
+      case 2:
+        bot.setControlState('left', true);
+        break;
+      case 3:
+        bot.setControlState('right', true);
+        break;
+      case 4:
         bot.setControlState('sneak', true);
         setTimeout(() => bot && bot.setControlState('sneak', false), 800);
         break;
-      case 5: break;
+      case 5:
+        break;
     }
 
     const moveDuration = 500 + Math.random() * 700;
