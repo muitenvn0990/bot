@@ -1,7 +1,7 @@
 const mineflayer = require('mineflayer');
 const http = require('http');
 
-// ==================== KHỎI TẠO WEB SERVER (GIỮ BOT ONLINE 24/7 TRÊN RENDER) ====================
+// ==================== KHỎI TẠO WEB SERVER (24/7 RENDER) ====================
 process.on('uncaughtException', (err) => console.log('[Lỗi Hệ Thống]:', err.message));
 process.on('unhandledRejection', (reason) => console.log('[Lỗi Rejection]:', reason));
 
@@ -13,19 +13,19 @@ http.createServer((req, res) => {
   console.log(`[Web Server] Khởi chạy cổng ${PORT}`);
 });
 
-// ==================== CẤU HÌNH BOT ====================
+// ==================== CẤU HÌNH BOT GIẢ LẬP VANILLA CLIENT ====================
 const botOptions = {
   host: 'muitenvn.seedloaf.gg',
   port: 55386,
   username: 'AFK_Bot_247',
-  version: '1.20.1'
+  version: '1.20.1',
+  brand: 'vanilla', // Giả lập Brand gói tin chuẩn Vanilla Mojang
+  viewDistance: 'far'
 };
 
 let bot = null;
 let afkLoopTimer = null;
 let isReconnecting = false;
-let lastPosition = null;
-let stuckCount = 0;
 
 function createBot() {
   isReconnecting = false;
@@ -42,48 +42,56 @@ function createBot() {
 
   bot = mineflayer.createBot(botOptions);
 
+  // 1. Giả lập độ trễ mạng (Ping Jitter) khi phản hồi gói KeepAlive
+  bot._client.on('keep_alive', (packet) => {
+    const networkLatency = 60 + Math.floor(Math.random() * 90); // Delay 60ms - 150ms như người thật
+    setTimeout(() => {
+      if (bot && bot._client) {
+        bot._client.write('keep_alive', { keepAliveId: packet.keepAliveId });
+      }
+    }, networkLatency);
+  });
+
   bot.on('spawn', () => {
-    console.log('[Bot] Đã vào server! Khởi động hệ thống Anti-AFK thế hệ mới...');
-    startAdvancedAFKEngine();
+    console.log('[Bot] Đã kết nối! Đang hoạt động ở chế độ giả lập người chơi Vanilla...');
+    startStealthAFKEngine();
   });
 
-  bot.on('death', () => {
-    console.log('[Bot] Bị hạ gục, đang tự động hồi sinh...');
-  });
-
-  // Tự động ăn khi đói
+  // Tự động ăn với độ trễ phản xạ người chơi
   bot.on('health', () => {
     if (!bot || bot.food >= 15) return;
     const food = bot.inventory.items().find(i => 
       ['cooked_beef', 'cooked_porkchop', 'cooked_chicken', 'bread', 'apple', 'baked_potato', 'steak'].some(f => i.name.includes(f))
     );
     if (food) {
-      bot.equip(food, 'hand')
-        .then(() => bot.consume())
-        .catch(() => {});
+      setTimeout(() => {
+        if (!bot) return;
+        bot.equip(food, 'hand')
+          .then(() => bot.consume())
+          .catch(() => {});
+      }, 300 + Math.random() * 400);
     }
   });
 
-  // Tự động kết nối lại khi mất mạng / kicked
   const handleReconnect = (reason) => {
     if (isReconnecting) return;
     isReconnecting = true;
     if (afkLoopTimer) clearTimeout(afkLoopTimer);
 
-    const delay = 10000 + Math.floor(Math.random() * 5000);
-    console.log(`[${reason}] Mất kết nối. Thử đăng nhập lại sau ${Math.round(delay / 1000)}s...`);
+    const delay = 12000 + Math.floor(Math.random() * 6000);
+    console.log(`[${reason}] Thử kết nối lại sau ${Math.round(delay / 1000)}s...`);
     setTimeout(() => createBot(), delay);
   };
 
   bot.on('end', () => handleReconnect('End'));
-  bot.on('kicked', (reason) => handleReconnect(`Kicked`));
+  bot.on('kicked', (reason) => handleReconnect('Kicked'));
   bot.on('error', (err) => handleReconnect(`Error: ${err.message}`));
 }
 
-// ==================== HỆ THỐNG ANTI-AFK THÔNG MINH (GIẢ LẬP NGƯỜI THẬT) ====================
+// ==================== HỆ THỐNG GIẢ LẬP HÀNH VI ẨN DANH ====================
 
-// 1. Hàm quay đầu mượt mà (Tránh xoay giật cục bị plugin phát hiện)
-function smoothLook(targetYaw, targetPitch, steps = 8) {
+// Quay góc nhìn có độ rung nhẹ tay người (Human Hand Jitter)
+function smoothLookHuman(targetYaw, targetPitch, steps = 10) {
   if (!bot || !bot.entity) return;
   let currentStep = 0;
   const startYaw = bot.entity.yaw;
@@ -96,17 +104,21 @@ function smoothLook(targetYaw, targetPitch, steps = 8) {
     }
     currentStep++;
     const progress = currentStep / steps;
-    const nextYaw = startYaw + (targetYaw - startYaw) * progress;
-    const nextPitch = startPitch + (targetPitch - startPitch) * progress;
+
+    // Sai số ngẫu nhiên mô phỏng vi sai di chuột
+    const jitterYaw = (Math.random() - 0.5) * 0.015;
+    const jitterPitch = (Math.random() - 0.5) * 0.01;
+
+    const nextYaw = startYaw + (targetYaw - startYaw) * progress + jitterYaw;
+    const nextPitch = startPitch + (targetPitch - startPitch) * progress + jitterPitch;
 
     bot.look(nextYaw, nextPitch, true);
 
     if (currentStep >= steps) clearInterval(interval);
-  }, 40);
+  }, 30 + Math.floor(Math.random() * 15));
 }
 
-// 2. Lõi hành vi Anti-AFK đa dạng
-function startAdvancedAFKEngine() {
+function startStealthAFKEngine() {
   function afkRoutine() {
     if (!bot || !bot.entity) {
       afkLoopTimer = setTimeout(afkRoutine, 3000);
@@ -114,110 +126,43 @@ function startAdvancedAFKEngine() {
     }
 
     bot.clearControlStates();
-    const p = bot.entity.position;
 
-    // BẢO VỆ 1: Tránh rớt Void / Chưa load xong map
-    if (p.y <= 0) {
-      afkLoopTimer = setTimeout(afkRoutine, 4000);
-      return;
-    }
-
-    // BẢO VỆ 2: Kiểm tra kẹt tường (Stuck Detection)
-    if (lastPosition && p.distanceTo(lastPosition) < 0.2) {
-      stuckCount++;
-    } else {
-      stuckCount = 0;
-    }
-    lastPosition = p.clone();
-
-    // Nếu bị kẹt vào góc quá 3 lần -> Tự xoay 180 độ và nhảy ra ngoài
-    if (stuckCount >= 3) {
-      stuckCount = 0;
-      const escapeYaw = bot.entity.yaw + Math.PI;
-      smoothLook(escapeYaw, 0);
-      bot.setControlState('jump', true);
-      bot.setControlState('forward', true);
-      setTimeout(() => {
-        if (bot) bot.clearControlStates();
-      }, 600);
-      afkLoopTimer = setTimeout(afkRoutine, 2000);
-      return;
-    }
-
-    // RANDOM HÀNH VI GIẢ LẬP NGƯỜI CHƠI THẬT (5 KỊCH BẢN)
-    const actionType = Math.floor(Math.random() * 5);
-
-    switch (actionType) {
-      case 0: {
-        // Kịch bản 0: Đứng quan sát xung quanh (Xoay đầu mượt + Nhìn người chơi gần đó)
-        const nearbyPlayer = bot.nearestEntity(e => e.type === 'player' && e.username !== bot.username && e.position.distanceTo(bot.entity.position) < 10);
-        if (nearbyPlayer) {
-          const target = nearbyPlayer.position.offset(0, nearbyPlayer.height, 0);
-          bot.lookAt(target, false);
-        } else {
-          const randomYaw = (Math.random() * 2 - 1) * Math.PI;
-          const randomPitch = (Math.random() * 0.4 - 0.2);
-          smoothLook(randomYaw, randomPitch);
-        }
-        if (Math.random() < 0.4) bot.swingArm('right');
-        break;
-      }
-
-      case 1: {
-        // Kịch bản 1: Đi dạo ngắn (Tiến/Lùi) kèm kiểm tra chướng ngại vật
-        const randomDir = Math.random() < 0.7 ? 'forward' : 'back';
-        bot.setControlState(randomDir, true);
-        
-        // Nếu có vật cản thấp 1 block -> Tự động nhảy qua
-        if (Math.random() < 0.3) {
-          bot.setControlState('jump', true);
-          setTimeout(() => bot && bot.setControlState('jump', false), 350);
-        }
-
+    const actions = [
+      // Kịch bản A: Nhìn ngẫu nhiên có độ rung tay
+      () => {
+        const y = bot.entity.yaw + (Math.random() - 0.5) * 1.4;
+        const p = (Math.random() - 0.5) * 0.5;
+        smoothLookHuman(y, p);
+      },
+      // Kịch bản B: Nhấp phím di chuyển ngắn với thời gian giữ phím lẻ
+      () => {
+        const dir = Math.random() < 0.6 ? 'forward' : 'back';
+        bot.setControlState(dir, true);
         setTimeout(() => {
           if (bot) bot.clearControlStates();
-        }, 600 + Math.random() * 800);
-        break;
-      }
-
-      case 2: {
-        // Kịch bản 2: Ngồi xổm (Sneak) kiểm tra góc nhìn (Giống đang xem kho/chat)
+        }, 280 + Math.random() * 550);
+      },
+      // Kịch bản C: Đổi hotbar với độ trễ phản xạ
+      () => {
+        const slot = Math.floor(Math.random() * 9);
+        setTimeout(() => {
+          if (bot) bot.setQuickBarSlot(slot);
+        }, 180 + Math.random() * 220);
+      },
+      // Kịch bản D: Ngồi xuống quan sát ngắn
+      () => {
         bot.setControlState('sneak', true);
-        const lookDownPitch = 0.5 + Math.random() * 0.3;
-        smoothLook(bot.entity.yaw, lookDownPitch);
-
         setTimeout(() => {
-          if (!bot) return;
-          bot.setControlState('sneak', false);
-          smoothLook(bot.entity.yaw, 0);
-        }, 1200 + Math.random() * 1000);
-        break;
+          if (bot) bot.setControlState('sneak', false);
+        }, 700 + Math.random() * 900);
       }
+    ];
 
-      case 3: {
-        // Kịch bản 3: Đổi ô Hotbar + Vung tay (Giả lập sắp xếp túi đồ)
-        const randomSlot = Math.floor(Math.random() * 9);
-        bot.setQuickBarSlot(randomSlot);
-        setTimeout(() => {
-          if (bot) bot.swingArm('right');
-        }, 300);
-        break;
-      }
+    const randomAction = actions[Math.floor(Math.random() * actions.length)];
+    randomAction();
 
-      case 4: {
-        // Kịch bản 4: Nhảy quay góc (Jump + Turn 90 độ)
-        const newYaw = bot.entity.yaw + (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-        smoothLook(newYaw, 0);
-        bot.setControlState('jump', true);
-        setTimeout(() => {
-          if (bot) bot.setControlState('jump', false);
-        }, 400);
-        break;
-      }
-    }
-
-    // Thời gian nghỉ giữa các hành động ngẫu nhiên (từ 3.5s - 7s) để không tạo chu kỳ cố định
-    const nextInterval = 3500 + Math.floor(Math.random() * 3500);
+    // Chu kỳ ngẫu nhiên không trùng lặp (4.2s - 8.5s)
+    const nextInterval = 4200 + Math.floor(Math.random() * 4300);
     afkLoopTimer = setTimeout(afkRoutine, nextInterval);
   }
 
